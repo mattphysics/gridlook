@@ -64,6 +64,10 @@ export class ZarrDataManager {
   }
 
   public static async createNewStore(storePath: string, isIcechunk = false) {
+    // zarrita requires absolute URLs; resolve path-relative URLs against the current origin
+    if (typeof window !== "undefined" && storePath.startsWith("/")) {
+      storePath = window.location.origin + storePath;
+    }
     let store: zarr.AsyncReadable | undefined = undefined;
     if (isIcechunk || this.isIcechunkStorePath(storePath)) {
       store = await this.createIcechunkStore(storePath);
