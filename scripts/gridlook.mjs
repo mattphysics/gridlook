@@ -141,6 +141,12 @@ function detectDatasetType(absPath) {
   }
 
   if (stat.isDirectory()) {
+    // Parquet reference stores are directories (e.g. ".parq"/".parquet").
+    // Check this before the zarr markers below, since such stores can also
+    // contain a ".zmetadata" file and would otherwise be misdetected as zarr.
+    if (lower.endsWith(".parq") || lower.endsWith(".parquet")) {
+      return "parquet";
+    }
     if (lower.endsWith(".zarr")) {
       return "zarr";
     }
