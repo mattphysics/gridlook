@@ -87,3 +87,17 @@ fast locally but stepping through time will have a short pause per step.
 | ----------- | -------------------------------------- | ------------------------ | ------------ |
 | Any `.zarr` | `cd / && python3 -m http.server 8080`  | `/#/localdata<abs-path>` | `ZARR_PORT`  |
 | Any `.parq` | `zarr_parquet_proxy.py file.parq 9091` | `/#/parqproxy/`          | `PARQ_PORT`  |
+
+---
+
+## on Macbook
+
+```sh
+cd / && python3 -m http.server 8888
+# then:
+ZARR_PORT=8888 npm run dev
+```
+
+```
+Open: http://localhost:3000/#/localdata/Volumes/T7/annual_extremes_stats.zarr
+```
