@@ -1,6 +1,53 @@
 # Using gridlook locally (ECMWF)
 
-## One-time: start the app
+## Quick start: one command
+
+The fastest way to open any local dataset is the `gridlook` launcher. It
+auto-detects whether the path is a zarr store or a gribscan/kerchunk parquet
+reference, starts the matching data server **and** the dev server, and opens
+your browser at the right URL.
+
+```sh
+# one-time, from the repo root
+npm install
+npm link   # exposes a global `gridlook` command
+
+# then, from anywhere
+gridlook /path/to/dataset.zarr
+gridlook /path/to/file.parq
+```
+
+Or without linking, from the repo root:
+
+```sh
+npm run open -- /path/to/dataset.zarr
+```
+
+Options:
+
+| Flag            | Description                                                       |
+| --------------- | ----------------------------------------------------------------- |
+| `--port <n>`    | Preferred dev-server port (default 3000; falls back if occupied). |
+| `--python <bin>`| Python interpreter for the parquet proxy (default `python3`).     |
+| `--root <dir>`  | Filesystem root the zarr HTTP server serves (default `/`).        |
+| `--no-open`     | Print the URL but do not open the browser.                        |
+
+The launcher picks free ports automatically, so you can run it multiple times.
+Press `Ctrl+C` to stop both servers.
+
+> On macOS, serving zarr from an external drive requires granting **Full Disk
+> Access** to your terminal app (System Settings → Privacy & Security).
+> For the parquet proxy, point `--python` (or `$GRIDLOOK_PYTHON`) at a Python
+> with `gribscan` + `zarr` installed.
+
+---
+
+## Manual setup
+
+If you prefer to run the steps yourself (or need finer control), follow the
+sections below.
+
+### One-time: start the app
 
 ```sh
 cd /home/neam/code/gridlook && npm run dev
