@@ -1,150 +1,75 @@
-# Using gridlook locally (ECMWF)
+# Using gridlook locally
 
-## Quick start: one command
+There are two ways to open a dataset. Both work for zarr v2, zarr v3, and
+parquet.
 
-The fastest way to open any local dataset is the `gridlook` launcher. It
-auto-detects whether the path is a zarr store or a gribscan/kerchunk parquet
-reference, starts the matching data server **and** the dev server, and opens
-your browser at the right URL.
+---
 
-```sh
-# one-time, from the repo root
-npm install
-npm link   # exposes a global `gridlook` command
-
-# then, from anywhere
-gridlook /path/to/dataset.zarr
-gridlook /path/to/file.parq
-```
-
-Or without linking, from the repo root:
+## Method 1 — one command (recommended)
 
 ```sh
+# from the repo root
+gridlook /path/to/dataset.zarr    # after: npm link
+# or, without linking:
 npm run open -- /path/to/dataset.zarr
 ```
 
+`npm run open` is just a shorthand for `node scripts/gridlook.mjs`. Both do
+the same thing: auto-detect the dataset type, start the right data server,
+start Vite, and open the browser. Press `Ctrl+C` to stop everything.
+
 Options:
 
-| Flag            | Description                                                       |
-| --------------- | ----------------------------------------------------------------- |
-| `--port <n>`    | Preferred dev-server port (default 3000; falls back if occupied). |
-| `--python <bin>`| Python interpreter for the parquet proxy (default `python3`).     |
-| `--root <dir>`  | Filesystem root the zarr HTTP server serves (default `/`).        |
-| `--no-open`     | Print the URL but do not open the browser.                        |
-
-The launcher picks free ports automatically, so you can run it multiple times.
-Press `Ctrl+C` to stop both servers.
+| Flag             | Description                                                       |
+| ---------------- | ----------------------------------------------------------------- |
+| `--port <n>`     | Preferred dev-server port (default 3000; falls back if occupied). |
+| `--python <bin>` | Python interpreter for the parquet proxy (default `python3`).     |
+| `--root <dir>`   | Filesystem root the zarr HTTP server serves (default `/`).        |
+| `--no-open`      | Print the URL but do not open the browser.                        |
 
 > On macOS, serving zarr from an external drive requires granting **Full Disk
 > Access** to your terminal app (System Settings → Privacy & Security).
-> For the parquet proxy, point `--python` (or `$GRIDLOOK_PYTHON`) at a Python
-> with `gribscan` + `zarr` installed.
+> For the parquet proxy, `--python` (or `$GRIDLOOK_PYTHON`) must point at a
+> Python with `gribscan` + `zarr` installed.
 
 ---
 
-## Manual setup
+## Method 2 — manual (dev workflow only)
 
-If you prefer to run the steps yourself (or need finer control), follow the
-sections below.
+Use this when you are actively developing gridlook and want to keep Vite
+running while swapping datasets, so you don't restart the dev server each time.
 
-### One-time: start the app
-
-```sh
-cd /home/neam/code/gridlook && npm run dev
-```
-
-App is at http://localhost:3000.
-
-If the default backend ports (8080 for zarr, 9091 for parquet) are already
-occupied, override them when starting the dev server:
+**Step 1** — start the dev server once, keep it running:
 
 ```sh
+npm run dev
+# or with custom ports if the defaults are occupied:
 ZARR_PORT=8888 PARQ_PORT=9099 npm run dev
 ```
 
----
+**Step 2** — for each dataset, start the matching data server in a second terminal:
 
-## Loading a local zarr
+| Dataset type  | Command                                                         | Port env var               |
+| ------------- | --------------------------------------------------------------- | -------------------------- |
+| zarr v2 or v3 | `node scripts/zarr_file_server.mjs / 8080`                      | `ZARR_PORT` (default 8080) |
+| parquet       | `python3 scripts/zarr_parquet_proxy.py /path/to/file.parq 9091` | `PARQ_PORT` (default 9091) |
 
-**Terminal 1** — serve the filesystem from root:
+> **Do not use `python3 -m http.server` for zarr.** Python's built-in server
+> ignores `Range` headers, which silently corrupts reads on sharding_indexed
+> zarr v3 stores. Use `zarr_file_server.mjs` instead.
 
-```sh
-cd / && python3 -m http.server 8080
-```
+**Step 3** — open in the browser:
 
-Use a different port if 8080 is occupied, and start the app with the matching env var:
+| Dataset type | URL                                                        |
+| ------------ | ---------------------------------------------------------- |
+| zarr         | `http://localhost:3000/#/localdata<absolute-path-to-zarr>` |
+| parquet      | `http://localhost:3000/#/parqproxy/`                       |
 
-```sh
-cd / && python3 -m http.server 8888
-# then:
-ZARR_PORT=8888 npm run dev
-```
-
-**Browser** — use the full absolute path after `/localdata`:
-
-```
-http://localhost:3000/#/localdata<absolute-path-to-zarr>
-```
-
-Example:
+Example zarr URL:
 
 ```
-http://localhost:3000/#/localdata/ec/fws5/lb/project/eerie/data/ERA5/mars/daily/an_daymean.zarr
+http://localhost:3000/#/localdata/Users/neam/Downloads/data.zarr
 ```
 
-Keep this server running for any zarr on the system. No restart needed for different datasets.
-
----
-
-## Loading a gribscan/kerchunk parquet
-
-**Terminal 1** — start the parquet proxy:
-
-```sh
-/perm/neam/conda/envs/science4_gribscan/bin/python \
-  /home/neam/code/gridlook/scripts/zarr_parquet_proxy.py \
-  /path/to/file.parq \
-  9091
-```
-
-Use a different port if 9091 is occupied, and start the app with the matching env var:
-
-```sh
-python zarr_parquet_proxy.py /path/to/file.parq 9099
-# then:
-PARQ_PORT=9099 npm run dev
-```
-
-**Browser:**
-
-```
-http://localhost:3000/#/parqproxy/
-```
-
-For a different parquet: stop the proxy (Ctrl+C), restart it with the new path, reload the page.
-
-The proxy decompresses GRIB data server-side. Each time step is ~100 MB — loading is
-fast locally but stepping through time will have a short pause per step.
-
----
-
-## Summary
-
-| Data type   | What to run                            | URL pattern              | Port env var |
-| ----------- | -------------------------------------- | ------------------------ | ------------ |
-| Any `.zarr` | `cd / && python3 -m http.server 8080`  | `/#/localdata<abs-path>` | `ZARR_PORT`  |
-| Any `.parq` | `zarr_parquet_proxy.py file.parq 9091` | `/#/parqproxy/`          | `PARQ_PORT`  |
-
----
-
-## on Macbook
-
-```sh
-cd / && python3 -m http.server 8888
-# then:
-ZARR_PORT=8888 npm run dev
-```
-
-```
-Open: http://localhost:3000/#/localdata/Volumes/T7/annual_extremes_stats.zarr
-```
+For a different zarr: just navigate to the new URL — no server restart needed.
+For a different parquet: stop the proxy (`Ctrl+C`), restart with the new path, reload the page.

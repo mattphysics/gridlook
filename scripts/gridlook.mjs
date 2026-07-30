@@ -23,6 +23,7 @@
  */
 
 import { spawn } from "node:child_process";
+import http from "node:http";
 import net from "node:net";
 import fs from "node:fs";
 import path from "node:path";
@@ -215,6 +216,140 @@ function waitForPort(port, { timeoutMs = 30000, intervalMs = 200 } = {}) {
   });
 }
 
+/**
+ * Static file server with full HTTP Range request support.
+ * Replaces `python -m http.server` which ignores Range headers, breaking
+ * sharding_indexed zarr v3 stores that need suffix range reads for shard
+ * index decoding.
+ *
+ * Returns a ChildProcess-compatible object so the rest of main() can manage
+ * it identically to the parquet proxy child process.
+ */
+function startZarrFileServer(root, port) {
+  const CORS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+    "Access-Control-Allow-Headers": "Range",
+    "Access-Control-Expose-Headers": "Content-Length, Content-Range",
+  };
+
+  const server = http.createServer((req, res) => {
+    if (req.method === "OPTIONS") {
+      res.writeHead(204, CORS);
+      res.end();
+      return;
+    }
+
+    // Decode and sanitise the path — prevent path-traversal attacks.
+    let relPath;
+    try {
+      relPath = decodeURIComponent(new URL(req.url, "http://x").pathname);
+    } catch {
+      res.writeHead(400, CORS);
+      res.end();
+      return;
+    }
+    const absFilePath = path.resolve(root, "." + relPath);
+    const resolvedRoot = path.resolve(root);
+    const rootPrefix = resolvedRoot.endsWith(path.sep)
+      ? resolvedRoot
+      : resolvedRoot + path.sep;
+    if (!absFilePath.startsWith(rootPrefix) && absFilePath !== resolvedRoot) {
+      res.writeHead(403, CORS);
+      res.end();
+      return;
+    }
+
+    fs.stat(absFilePath, (statErr, stat) => {
+      if (statErr || !stat.isFile()) {
+        res.writeHead(404, CORS);
+        res.end();
+        return;
+      }
+
+      const fileSize = stat.size;
+      const rangeHeader = req.headers["range"];
+
+      if (!rangeHeader) {
+        // Full file response.
+        res.writeHead(200, {
+          ...CORS,
+          "Content-Length": String(fileSize),
+          "Accept-Ranges": "bytes",
+          "Content-Type": "application/octet-stream",
+        });
+        if (req.method === "HEAD") {
+          res.end();
+          return;
+        }
+        fs.createReadStream(absFilePath).pipe(res);
+        return;
+      }
+
+      // Parse Range header.  Supports bytes=A-B and bytes=-N (suffix).
+      const match = rangeHeader.match(/^bytes=(\d*)-(\d*)$/);
+      if (!match) {
+        res.writeHead(416, { ...CORS, "Content-Range": `bytes */${fileSize}` });
+        res.end();
+        return;
+      }
+
+      let start, end;
+      if (match[1] === "") {
+        // Suffix range: bytes=-N
+        const suffixLen = parseInt(match[2], 10);
+        start = Math.max(0, fileSize - suffixLen);
+        end = fileSize - 1;
+      } else {
+        start = parseInt(match[1], 10);
+        end = match[2] !== "" ? parseInt(match[2], 10) : fileSize - 1;
+      }
+
+      if (isNaN(start) || isNaN(end) || start > end || end >= fileSize) {
+        res.writeHead(416, { ...CORS, "Content-Range": `bytes */${fileSize}` });
+        res.end();
+        return;
+      }
+
+      const chunkSize = end - start + 1;
+      res.writeHead(206, {
+        ...CORS,
+        "Content-Range": `bytes ${start}-${end}/${fileSize}`,
+        "Content-Length": String(chunkSize),
+        "Accept-Ranges": "bytes",
+        "Content-Type": "application/octet-stream",
+      });
+      if (req.method === "HEAD") {
+        res.end();
+        return;
+      }
+      fs.createReadStream(absFilePath, { start, end }).pipe(res);
+    });
+  });
+
+  server.listen(port, "127.0.0.1");
+
+  // Return a ChildProcess-like object for uniform lifecycle management.
+  const errorHandlers = [];
+  const exitHandlers = [];
+  server.on("error", (err) => {
+    for (const h of errorHandlers) h(err);
+  });
+  return {
+    killed: false,
+    kill() {
+      this.killed = true;
+      server.close();
+      for (const h of exitHandlers) h(0);
+    },
+    on(event, handler) {
+      if (event === "error") errorHandlers.push(handler);
+      else if (event === "exit") exitHandlers.push(handler);
+      return this;
+    },
+  };
+}
+
 function openBrowser(url) {
   const platform = process.platform;
   let cmd;
@@ -265,11 +400,7 @@ async function main() {
   let dataReadyPort = dataPort;
   if (type === "zarr") {
     console.log(`Serving filesystem from "${opts.root}" on port ${dataPort} ...`);
-    dataServer = spawn(
-      opts.python,
-      ["-m", "http.server", String(dataPort)],
-      { cwd: opts.root, stdio: "inherit" }
-    );
+    dataServer = startZarrFileServer(opts.root, dataPort);
   } else {
     console.log(`Starting parquet proxy for ${absPath} on port ${dataPort} ...`);
     dataServer = spawn(
