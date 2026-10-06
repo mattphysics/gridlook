@@ -52,6 +52,11 @@ npm run lint
 
 The project is served at http://localhost:3000/ when you run `npm run dev`.
 
+To view a local zarr store or parquet reference with one command
+(`gridlook /path/to/dataset.zarr`), including on a remote machine such as an
+HPC login node via VS Code or an SSH tunnel, see
+[docs/local-usage.md](docs/local-usage.md).
+
 ## CORS & Hosting Notes
 
 Gridlook loads datasets directly in the browser, so the server hosting the data must allow cross-origin browser requests with [CORS](https://developer.mozilla.org/de/docs/Web/HTTP/Guides/CORS).
