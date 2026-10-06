@@ -28,3 +28,6 @@ tsconfig.tsbuildinfo
 *.njsproj
 *.sln
 *.sw?
+
+# Python bytecode (scripts/zarr_parquet_proxy.py)
+__pycache__/
