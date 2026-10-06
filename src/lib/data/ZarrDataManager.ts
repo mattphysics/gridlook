@@ -32,6 +32,59 @@ export type TZarrVariableMetadata = {
 
 type TDatasetSource = Pick<TDataSource, "dataset" | "store">;
 
+/**
+ * zarrita returns results in the array's memory order, so zarr v2 arrays with
+ * `order: "F"` (e.g. virtually transposed kerchunk references) come back
+ * column-major. The grids index `.data` as row-major, so copy those into C order.
+ */
+function toCOrder<T>(result: T): T {
+  if (!result || typeof result !== "object" || !("stride" in result)) {
+    return result;
+  }
+  const { data, shape, stride } =
+    result as unknown as zarr.Chunk<zarr.DataType>;
+  const rank = shape.length;
+  let isC = true;
+  for (let i = rank - 1, step = 1; i >= 0; i--) {
+    if (shape[i] > 1 && stride[i] !== step) {
+      isC = false;
+      break;
+    }
+    step *= shape[i];
+  }
+  if (isC || !ArrayBuffer.isView(data)) {
+    return result;
+  }
+  const src = data as unknown as ArrayLike<unknown> & { length: number };
+  const Ctor = src.constructor as new (n: number) => typeof src;
+  const out = new Ctor(src.length) as unknown as unknown[];
+  const cStride = new Array<number>(rank);
+  for (let i = rank - 1, step = 1; i >= 0; i--) {
+    cStride[i] = step;
+    step *= shape[i];
+  }
+  const index = new Array<number>(rank).fill(0);
+  const last = rank - 1;
+  const innerLen = shape[last];
+  const innerStride = stride[last];
+  for (let outPos = 0; outPos < src.length; outPos += innerLen) {
+    let srcPos = 0;
+    for (let d = 0; d < last; d++) {
+      srcPos += index[d] * stride[d];
+    }
+    for (let k = 0; k < innerLen; k++) {
+      out[outPos + k] = src[srcPos + k * innerStride];
+    }
+    for (let d = last - 1; d >= 0; d--) {
+      if (++index[d] < shape[d]) {
+        break;
+      }
+      index[d] = 0;
+    }
+  }
+  return { data: out, shape, stride: cStride } as unknown as T;
+}
+
 export class ZarrDataManager {
   private static pendingStore: Promise<
     zarr.Location<zarr.AsyncReadable>
@@ -191,19 +244,19 @@ export class ZarrDataManager {
   ) {
     const array = await this.getVariableInfo(datasource, variable);
     if (selection && selection.length > 0) {
-      return await zarr.get(array, selection);
+      return toCOrder(await zarr.get(array, selection));
     }
-    return await zarr.get(array);
+    return toCOrder(await zarr.get(array));
   }
 
-  static getVariableDataFromArray(
+  static async getVariableDataFromArray(
     array: zarr.Array<zarr.DataType, zarr.AsyncReadable>,
     selection?: (number | null | zarr.Slice)[]
   ) {
     if (selection && selection.length > 0) {
-      return zarr.get(array, selection);
+      return toCOrder(await zarr.get(array, selection));
     }
-    return zarr.get(array);
+    return toCOrder(await zarr.get(array));
   }
 
   static async getCRSInfo(
