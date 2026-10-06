@@ -3,6 +3,7 @@ import * as zarr from "zarrita";
 import {
   getCRSWkt,
   getLatLonData,
+  hasSpatialDimensions,
   isLatitudeName,
   isLongitudeName,
   isProjectedXName,
@@ -240,6 +241,11 @@ async function determineGridTypeFromData(
     );
     if (latitudes === null || longitudes === null) {
       return null; // Cannot determine grid type without lat/lon data
+    }
+    if (
+      !hasSpatialDimensions(datasources.levels[0].datasources, varnameSelector)
+    ) {
+      return null; // lat/lon exist in the store, but not along this variable
     }
     const latitudesData = latitudes.data as Float64Array;
     const longitudesData = longitudes.data as Float64Array;

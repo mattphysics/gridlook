@@ -3,6 +3,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 import {
   getCRSWkt,
   getLatLonData,
+  hasSpatialDimensions,
   isLatitudeName,
   isLongitudeName,
   isProjectedXName,
@@ -16,6 +17,7 @@ import { ZARR_FORMAT, type TSources } from "@/lib/types/GlobeTypes.ts";
 vi.mock("@/lib/data/coordinateVariables.ts", () => ({
   getCRSWkt: vi.fn(),
   getLatLonData: vi.fn(),
+  hasSpatialDimensions: vi.fn(),
   isLatitudeName: vi.fn(),
   isLongitudeName: vi.fn(),
   isProjectedXName: vi.fn(),
@@ -147,6 +149,7 @@ beforeEach(() => {
 
   vi.mocked(getCRSWkt).mockResolvedValue(null);
   vi.mocked(getLatLonData).mockRejectedValue(new Error("No lat/lon data"));
+  vi.mocked(hasSpatialDimensions).mockReturnValue(true);
   vi.mocked(isLatitudeName).mockImplementation((name) =>
     ["lat", "latitude", "rlat"].includes(getLocalName(name))
   );
@@ -268,6 +271,17 @@ it.each([
     await expect(detectGridType(sources)).resolves.toBe(expectedGridType);
   }
 );
+
+it("returns error when lat/lon exist but are not along the variable", async () => {
+  const sources = createSources(["time", "block"]);
+  mockDataVariable();
+  vi.mocked(getLatLonData).mockResolvedValue(
+    createLatLonData([45, 0, -45], [0, 90, 180], [3])
+  );
+  vi.mocked(hasSpatialDimensions).mockReturnValue(false);
+
+  await expect(detectGridType(sources)).resolves.toBe(GRID_TYPES.ERROR);
+});
 
 it.each([
   ["PROJCS[Polar Stereographic]", GRID_TYPES.CURVILINEAR],

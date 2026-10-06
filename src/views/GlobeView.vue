@@ -9,6 +9,7 @@ import type {
   TSources,
 } from "../lib/types/GlobeTypes.ts";
 
+import { hasSpatialDimensions } from "@/lib/data/coordinateVariables.ts";
 import {
   getGridType,
   GRID_TYPES,
@@ -234,8 +235,13 @@ function prepareDefaults(src: string, index: TSources) {
     const varinfo = modelInfo.value!.vars[varname];
     return !varinfo.hidden;
   });
+  // Prefer a variable that can be mapped over e.g. per-region time series
+  const firstMappableVar =
+    validVars.find((varname) =>
+      hasSpatialDimensions(modelInfo.value!.vars, varname)
+    ) ?? validVars[0];
   varnameSelector.value =
-    paramVarname.value ?? modelInfo.value!.defaultVar ?? validVars[0];
+    paramVarname.value ?? modelInfo.value!.defaultVar ?? firstMappableVar;
 
   if (
     datasources.value &&

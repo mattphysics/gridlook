@@ -321,6 +321,59 @@ export function isLatitudeName(name: string) {
   );
 }
 
+/**
+ * Whether a variable can be placed on the map: it either has a geographic
+ * dimension (lat/lon/x/y) or shares a dimension with the lat/lon coordinate
+ * variables of its group (e.g. `value` for unstructured grids). Variables like
+ * per-region time series (`time, block`) return false. Returns true when this
+ * cannot be decided from the metadata.
+ */
+export function hasSpatialDimensions(
+  sources: TSources["levels"][0]["datasources"],
+  variable: string
+) {
+  const dimensions = sources[variable]?.attrs?.dimensionNames as
+    | string[]
+    | undefined;
+  if (!Array.isArray(dimensions)) {
+    return true;
+  }
+  if (
+    dimensions.some(
+      (dim) =>
+        isLatitudeName(dim) ||
+        isLongitudeName(dim) ||
+        isProjectedXName(dim) ||
+        isProjectedYName(dim)
+    )
+  ) {
+    return true;
+  }
+  const variableGroup = getVariableGroup(variable);
+  const coordinateDims = new Set<string>();
+  for (const sourceKey in sources) {
+    if (
+      sourceKey === variable ||
+      getVariableGroup(sourceKey) !== variableGroup
+    ) {
+      continue;
+    }
+    const attrs = sources[sourceKey].attrs;
+    if (
+      isLatitudeVariable(sourceKey, attrs) ||
+      isLongitudeVariable(sourceKey, attrs)
+    ) {
+      for (const dim of (attrs?.dimensionNames as string[] | undefined) ?? []) {
+        coordinateDims.add(dim);
+      }
+    }
+  }
+  if (coordinateDims.size === 0) {
+    return true;
+  }
+  return dimensions.some((dim) => coordinateDims.has(dim));
+}
+
 function lonPriority(name: string) {
   const variableName = getVariableLocalName(name);
   if (variableName === "rlon") {
