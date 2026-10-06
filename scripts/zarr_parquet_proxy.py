@@ -49,6 +49,8 @@ def patch_zarray(meta: dict) -> dict:
     meta = dict(meta)
     meta["compressor"] = None
     meta["filters"] = None
+    # chunks are served via ndarray.tobytes(), which is always C order
+    meta["order"] = "C"
     if "dimension_separator" not in meta:
         meta["dimension_separator"] = "."
     return meta
@@ -70,6 +72,12 @@ def _read_chunk_sync(z, var_path: str, chunk_idx: tuple) -> bytes:
         for ci, cs, s in zip(chunk_idx, arr.chunks, arr.shape)
     )
     chunk = arr[slices]
+    if chunk.shape != tuple(arr.chunks):
+        # zarr v2 edge chunks must be stored at full chunk size, padded
+        fill = arr.fill_value if arr.fill_value is not None else 0
+        full = np.full(arr.chunks, fill, dtype=arr.dtype)
+        full[tuple(slice(0, n) for n in chunk.shape)] = chunk
+        chunk = full
     return chunk.astype(arr.dtype, copy=False).tobytes()
 
 
